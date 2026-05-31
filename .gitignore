@@ -29,6 +29,8 @@ Thumbs.db
 
 # OpenCode runtime (keep config, exclude runtime data)
 .omo/run-continuation/
+.omo/monitor/
+.omo/agent_state
 .omo/agent_events.log
 
 # MCP tools (large, install separately)

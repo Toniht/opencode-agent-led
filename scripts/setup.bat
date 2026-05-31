@@ -15,7 +15,5 @@ pio platform install espressif32
 echo.
 echo Setup complete. Next steps:
 echo   1. Connect ESP32-S3 via USB
-echo   2. Check COM port: pio device list
-echo   3. Update COM port in scripts\start_monitor.bat if needed
-echo   4. Flash firmware: pio run -t upload --upload-port COMx
-echo   5. Start monitor: scripts\start_monitor.bat
+echo   2. Flash firmware: pio run -t upload
+echo   3. Start monitor: scripts\start_monitor.bat

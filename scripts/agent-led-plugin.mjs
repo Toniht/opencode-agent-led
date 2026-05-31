@@ -11,16 +11,16 @@ let errorCount = 0;
 
 function log(dir, msg) {
   try {
-    mkdirSync(join(dir, ".omo"), { recursive: true });
-    appendFileSync(join(dir, ".omo", "agent_events.log"),
+    mkdirSync(join(dir, ".omo", "monitor"), { recursive: true });
+    appendFileSync(join(dir, ".omo", "monitor", "agent_events.log"),
       `${new Date().toISOString()} ${msg}\n`, "utf-8");
   } catch {}
 }
 
 function writeState(dir, state) {
   try {
-    mkdirSync(join(dir, ".omo"), { recursive: true });
-    writeFileSync(join(dir, ".omo", "agent_state"), state, "utf-8");
+    mkdirSync(join(dir, ".omo", "monitor"), { recursive: true });
+    writeFileSync(join(dir, ".omo", "monitor", "agent_state"), state, "utf-8");
     if (state !== currentState) {
       log(dir, `STATE: ${currentState} → ${state}`);
     }

@@ -3,7 +3,7 @@ REM Agent Status LED Monitor
 cd /d %~dp0..
 echo === Agent Status LED Monitor ===
 REM Initialize state to IDLE (prevents stale EXECUTING from previous session)
-echo IDLE> .omo\agent_state
+echo IDLE> .omo\monitor\agent_state
 echo Starting pipeline: bridge ^| relay (auto-detect ESP32)
 echo Press Ctrl+C to stop
 echo.

@@ -21,8 +21,8 @@ import time
 from datetime import datetime, timezone
 from pathlib import Path
 
-STATE_FILE = Path(__file__).resolve().parent.parent / ".omo" / "agent_state"
-STATS_FILE = Path(__file__).resolve().parent.parent / ".omo" / "task_stats.csv"
+STATE_FILE = Path(__file__).resolve().parent.parent / ".omo" / "monitor" / "agent_state"
+STATS_FILE = Path(__file__).resolve().parent.parent / ".omo" / "monitor" / "task_stats.csv"
 POLL_INTERVAL = 0.3
 STATS_REPORT_INTERVAL = 10  # print summary every N transitions
 
@@ -112,12 +112,9 @@ def main():
     transition_count = 0       # number of state transitions seen
     task_count = 0             # number of completed EXECUTING->IDLE transitions
 
-    # Ensure .omo directory exists
+    # Ensure monitor directory exists, clear previous stats
     STATS_FILE.parent.mkdir(parents=True, exist_ok=True)
-
-    # Ensure CSV header exists
-    if not STATS_FILE.exists():
-        STATS_FILE.write_text("timestamp,duration_seconds,state_from,state_to\n", encoding="utf-8")
+    STATS_FILE.write_text("timestamp,duration_seconds,state_from,state_to\n", encoding="utf-8")
 
     print(f"[bridge] watching {STATE_FILE}", file=sys.stderr)
     print(f"[bridge] poll={args.interval}s", file=sys.stderr)
