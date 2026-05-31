@@ -1,6 +1,6 @@
 /**
- * Agent Status LED Plugin v5 — auto-start monitor on ESP32 detect.
- * Writes to .omo/monitor/agent_state, auto-launches bridge+relay pipeline.
+ * Agent Status LED Plugin v6 — direct relay control, no bridge pipe.
+ * Auto-detects ESP32, spawns relay, writes commands directly to stdin.
  */
 import { writeFileSync, appendFileSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
@@ -9,8 +9,10 @@ import { spawn } from "node:child_process";
 let currentState = "IDLE";
 let previousState = "IDLE";
 let errorCount = 0;
-let pipeline = null;       // bridge+relay child process
+let relay = null;
 let portCheckTimer = null;
+
+const stateToCmd = { IDLE: "IDLE", EXECUTING: "EXEC", QUESTION: "QUESTION", ERROR: "ERROR" };
 
 function log(dir, msg) {
   try {
@@ -20,21 +22,14 @@ function log(dir, msg) {
   } catch {}
 }
 
-function writeState(dir, state) {
-  try {
-    mkdirSync(join(dir, ".omo", "monitor"), { recursive: true });
-    writeFileSync(join(dir, ".omo", "monitor", "agent_state"), state, "utf-8");
-    if (state !== currentState) {
-      log(dir, `STATE: ${currentState} → ${state}`);
-    }
-    currentState = state;
-  } catch (e) {
-    log(dir, `ERROR: ${e.message}`);
+function sendCmd(cmd) {
+  if (relay && relay.stdin && !relay.killed) {
+    try { relay.stdin.write(cmd + "\n"); } catch {}
   }
 }
 
-function detectESP32(dir) {
-  return new Promise((resolve) => {
+function detectESP32() {
+  return new Promise(resolve => {
     const py = spawn("python", ["-c",
       "import serial.tools.list_ports; ports=list(serial.tools.list_ports.comports());" +
       "esp=[p.device for p in ports if p.vid in (0x303A,0x10C4,0x1A86) or 'CH34' in (p.description or '') or 'ESP' in (p.description or '')];" +
@@ -47,45 +42,42 @@ function detectESP32(dir) {
   });
 }
 
-function startPipeline(dir) {
-  if (pipeline) return;
+function startRelay(dir) {
+  if (relay) return;
   try {
-    log(dir, "PIPELINE START");
-    const bridge = spawn("python", [join(dir, "scripts", "agent_bridge.py"), "--interval", "0.3", "--stats"], { cwd: dir, stdio: ["ignore", "pipe", "ignore"] });
-    const relay = spawn("python", [join(dir, "scripts", "agent_relay.py")], { cwd: dir, stdio: [bridge.stdout, "ignore", "ignore"] });
-    pipeline = { bridge, relay };
-    bridge.on("exit", () => { if (pipeline) log(dir, "BRIDGE EXIT"); });
-    relay.on("exit", () => { pipeline = null; log(dir, "RELAY EXIT"); });
-  } catch (e) { log(dir, `PIPELINE ERROR: ${e.message}`); }
+    log(dir, "RELAY START");
+    relay = spawn("python", [join(dir, "scripts", "agent_relay.py")], {
+      cwd: dir, stdio: ["pipe", "ignore", "pipe"]
+    });
+    relay.stderr.on("data", d => log(dir, `RELAY: ${d.toString().trim()}`));
+    relay.on("exit", () => { relay = null; log(dir, "RELAY EXIT"); });
+    relay.on("error", e => { relay = null; log(dir, `RELAY ERROR: ${e.message}`); });
+    // Send initial state after relay boots
+    setTimeout(() => sendCmd(currentState === "QUESTION" ? "QUESTION" : stateToCmd[currentState] || "IDLE"), 2000);
+  } catch (e) { log(dir, `RELAY SPAWN ERROR: ${e.message}`); }
 }
 
-function stopPipeline(dir) {
-  if (!pipeline) return;
-  try {
-    log(dir, "PIPELINE STOP");
-    pipeline.bridge.kill();
-    pipeline.relay.kill();
-    pipeline = null;
-  } catch {}
+function stopRelay(dir) {
+  if (!relay) return;
+  try { log(dir, "RELAY STOP"); relay.kill(); relay = null; } catch {}
 }
 
 async function checkAndStart(dir) {
-  const port = await detectESP32(dir);
-  if (port && !pipeline) {
-    log(dir, `ESP32 FOUND: ${port} → starting pipeline`);
-    startPipeline(dir);
-  } else if (!port && pipeline) {
-    log(dir, "ESP32 GONE → stopping pipeline");
-    stopPipeline(dir);
+  const port = await detectESP32();
+  if (port && !relay) {
+    log(dir, `ESP32 FOUND: ${port}`);
+    startRelay(dir);
+  } else if (!port && relay) {
+    log(dir, "ESP32 GONE");
+    stopRelay(dir);
   }
 }
 
 /** @type {import("@opencode-ai/plugin").Plugin} */
 const AgentLedPlugin = async ({ directory }) => {
-  log(directory, "PLUGIN LOADED v5 (auto-monitor)");
-  writeState(directory, "IDLE");
+  log(directory, "PLUGIN LOADED v6 (direct relay)");
+  sendCmd("IDLE");
 
-  // Check immediately, then every 3 seconds
   await checkAndStart(directory);
   portCheckTimer = setInterval(() => checkAndStart(directory), 3000);
 
@@ -93,29 +85,27 @@ const AgentLedPlugin = async ({ directory }) => {
     async event({ event }) {
       const type = event.type;
       const props = event.properties || {};
-      log(directory, `EVENT: ${type} status=${props.status?.type || 'N/A'} session=${(props.sessionID||'').slice(0,12)}`);
+      log(directory, `EVENT: ${type} status=${props.status?.type || 'N/A'}`);
 
       switch (type) {
         case "session.status": {
           const s = props.status?.type;
-          if (s === "busy") { errorCount = 0; writeState(directory, "EXECUTING"); }
-          else if (s === "idle") { writeState(directory, "IDLE"); }
-          else if (s === "retry") { errorCount++; writeState(directory, errorCount >= 3 ? "ERROR" : "EXECUTING"); }
+          if (s === "busy") { errorCount = 0; currentState = "EXECUTING"; sendCmd("EXEC"); log(directory, "→ EXEC"); }
+          else if (s === "idle") { currentState = "IDLE"; sendCmd("IDLE"); log(directory, "→ IDLE"); }
+          else if (s === "retry") { errorCount++; currentState = errorCount >= 3 ? "ERROR" : "EXECUTING"; sendCmd(currentState === "ERROR" ? "ERROR" : "EXEC"); }
           break;
         }
-        case "session.idle": writeState(directory, "IDLE"); break;
-        case "session.error": errorCount++; writeState(directory, "ERROR"); log(directory, `ERROR #${errorCount}`); break;
-        case "question.asked": previousState = currentState; writeState(directory, "QUESTION"); break;
-        case "question.replied": writeState(directory, previousState || "IDLE"); break;
-        default: break;
+        case "session.idle": currentState = "IDLE"; sendCmd("IDLE"); break;
+        case "session.error": errorCount++; currentState = "ERROR"; sendCmd("ERROR"); break;
+        case "question.asked": previousState = currentState; currentState = "QUESTION"; sendCmd("QUESTION"); break;
+        case "question.replied": currentState = previousState || "IDLE"; sendCmd(stateToCmd[currentState] || "IDLE"); break;
       }
     },
 
     async dispose() {
       if (portCheckTimer) clearInterval(portCheckTimer);
-      stopPipeline(directory);
+      stopRelay(directory);
       log(directory, "PLUGIN DISPOSED");
-      writeState(directory, "IDLE");
     },
   };
 };
