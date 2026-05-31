@@ -53,7 +53,6 @@ function startPipeline(dir) {
     log(dir, "PIPELINE START");
     const bridge = spawn("python", [join(dir, "scripts", "agent_bridge.py"), "--interval", "0.3", "--stats"], { cwd: dir, stdio: ["ignore", "pipe", "ignore"] });
     const relay = spawn("python", [join(dir, "scripts", "agent_relay.py")], { cwd: dir, stdio: [bridge.stdout, "ignore", "ignore"] });
-    bridge.stdout.destroy();
     pipeline = { bridge, relay };
     bridge.on("exit", () => { if (pipeline) log(dir, "BRIDGE EXIT"); });
     relay.on("exit", () => { pipeline = null; log(dir, "RELAY EXIT"); });
