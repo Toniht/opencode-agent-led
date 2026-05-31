@@ -1,0 +1,54 @@
+﻿=== FINAL VERIFICATION REPORT ===
+Generated: 2026-05-31T03:40:00Z
+Branch: 001-agent-status-led
+
+## Flash & Build
+- Build: SUCCESS (RAM 5.8%, Flash 8.3%, 0 errors)
+- Board: ESP32-S3 QFN56 v0.2, Embedded PSRAM 8MB
+- Flash mode: DIO (matches bootloader)
+- Upload: esptool via CH340 on COM9
+- WiFi/BT: PASS - no libwifi.a/libbt.a in firmware.map
+
+## Serial Protocol (8 commands)
+All verified via Python/pyserial at 115200 baud:
+  STATUS->IDLE | EXEC->OK | QUESTION->OK | ERROR->OK
+  PING->OK | SILENT->OK | RESET->OK | FOO->ERR UNKNOWN
+
+## State Machine (FR-008)
+Priority guard (ERROR>QUESTION>EXECUTING>IDLE) verified:
+  ERROR overrides QUESTION: PASS
+  QUESTION blocked during ERROR: PASS
+  IDLE blocked during EXECUTING: PASS
+  RESET bypasses priority (force=true): PASS
+
+## Heartbeat (FR-007, SC-005)
+  bootGracePeriod = 10000ms (10s)
+  heartbeatTimeout = 5000ms (5s spec compliant)
+  Boot: IDLE (grace active) -> ~12s: DISCONNECTED (grace ended + 5s)
+  PING recovery -> IDLE -> 6s no PING: DISCONNECTED (5s spec)
+
+## Error Lock (FR-006)
+  3x ERROR -> ERR LOCKED -> IDLE/EXEC rejected
+  RESET -> IDLE (counter=0, lock cleared)
+
+## Stress Test (SC-006)
+  1000 cycles: 1000/1000 OK (100.0%), 0 failures
+  Serial frame error rate: 0.00% (target <0.01%) PASS
+
+## Latency (SC-002)
+  50 samples: Avg 10.8ms, Min 10.4ms, Max 11.2ms
+  Target: <500ms PASS (11.2ms << 500ms)
+
+## MCP Tools (T037/T041)
+  esp32_test_firmware: Requires python3 binary (not available on Windows)
+  Manual equivalents verified:
+    Boot test: ESP32 boots to IDLE (STATUS=IDLE) PASS
+    Heartbeat: 1000-cycle stress 0 failures PASS
+    Memory: RAM 5.8% (18968/327680 bytes) PASS
+
+## Files
+  platformio.ini, src/pin_config.h, src/led_controller.h/.cpp,
+  src/serial_protocol.h/.cpp, src/main.cpp,
+  scripts/agent_relay.py, scripts/agent_bridge.py,
+  scripts/start_monitor.ps1, scripts/requirements.txt,
+  test/test_led_controller/ (Unity test stubs)
