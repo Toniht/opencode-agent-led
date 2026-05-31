@@ -7,4 +7,4 @@ echo IDLE> .omo\agent_state
 echo Starting pipeline: bridge ^| relay (auto-detect ESP32)
 echo Press Ctrl+C to stop
 echo.
-python scripts\agent_bridge.py --interval 0.3 | python scripts\agent_relay.py -v
+python scripts\agent_bridge.py --interval 0.3 --stats | python scripts\agent_relay.py -v
