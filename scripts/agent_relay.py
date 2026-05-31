@@ -8,6 +8,7 @@ contracts/serial-protocol.md protocol.
 
 Usage:
     python scripts/agent_relay.py --dry-run
+    python scripts/agent_relay.py                        # auto-detect ESP32
     python scripts/agent_relay.py --port COM3
     python scripts/agent_relay.py --port COM3 --baud 115200 --heartbeat-interval 1.5
 
@@ -426,23 +427,43 @@ class SerialManager:
 
     @staticmethod
     def auto_detect_esp32() -> Optional[str]:
-        """Try to auto-detect an ESP32 serial port by VID/PID or description."""
+        """Try to auto-detect an ESP32 serial port by VID/PID or description.
+        
+        Returns the first match found. Use auto_detect_all_esp32() to get all candidates.
+        """
+        candidates = SerialManager.auto_detect_all_esp32()
+        return candidates[0] if candidates else None
+
+    @staticmethod
+    def auto_detect_all_esp32() -> list[str]:
+        """Return ALL detected ESP32 serial ports (VID/PID or description match).
+        
+        Each entry is a device name string (e.g., 'COM3', '/dev/ttyUSB0').
+        Detection criteria:
+          - VID 0x303A (Espressif) or 0x10C4 (Silicon Labs CP210x)
+          - Description contains: esp32, ch340, cp210, usb serial
+        """
         if not HAS_SERIAL:
-            return None
+            return []
+        candidates = []
         for port in serial.tools.list_ports.comports():
-            # ESP32-S3 common VID:PID pairs
+            matched = False
+            # Check VID:PID
             if port.vid and port.pid:
-                # Expressif VID = 0x303A, common PIDs: 0x1001 (USB-Serial-JTAG)
-                if port.vid == 0x303A or port.vid == 0x10C4:  # 10C4 = Silicon Labs CP210x
-                    LOG.info("[detect] found ESP32 candidate: %s (VID:PID=%04X:%04X, desc=%s)",
+                if port.vid == 0x303A or port.vid == 0x10C4:
+                    LOG.info("[detect] ESP32 candidate: %s (VID:PID=%04X:%04X, desc=%s)",
                              port.device, port.vid, port.pid, port.description)
-                    return port.device
-            desc = (port.description or "").lower()
-            if "esp32" in desc or "ch340" in desc or "cp210" in desc or "usb serial" in desc:
-                LOG.info("[detect] found candidate by description: %s (%s)",
-                         port.device, port.description)
-                return port.device
-        return None
+                    matched = True
+            # Check description
+            if not matched:
+                desc = (port.description or "").lower()
+                if any(kw in desc for kw in ("esp32", "ch340", "cp210", "usb serial")):
+                    LOG.info("[detect] ESP32 candidate by description: %s (%s)",
+                             port.device, port.description)
+                    matched = True
+            if matched:
+                candidates.append(port.device)
+        return candidates
 
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -509,9 +530,10 @@ def _build_argparser() -> argparse.ArgumentParser:
         epilog="""
 Examples:
   python scripts/agent_relay.py --dry-run                          # test mode (no serial)
+  python scripts/agent_relay.py                                    # auto-detect ESP32
   python scripts/agent_relay.py --port COM3                        # connect to ESP32 on COM3
   python scripts/agent_relay.py --port COM3 --heartbeat-interval 2 # 2s heartbeat
-  python scripts/agent_relay.py --list-ports                       # show available serial ports
+  python scripts/agent_relay.py --list-ports                       # show available serial ports + ESP32 detection
   echo "EXECUTING" | python scripts/agent_relay.py --dry-run       # pipe state commands
         """,
     )
@@ -546,7 +568,7 @@ Examples:
     p.add_argument(
         "--list-ports",
         action="store_true",
-        help="List available serial ports and exit.",
+        help="List available serial ports and detected ESP32 devices, then exit.",
     )
     p.add_argument(
         "--verbose", "-v",
@@ -608,10 +630,16 @@ def main():
     # ── list-ports shortcut ───────────────────────────────────────
     if args.list_ports:
         ports = SerialManager.list_ports()
+        esp32_candidates = SerialManager.auto_detect_all_esp32()
         if ports:
             print("Available serial ports:")
             for p in ports:
-                print(f"  {p}")
+                marker = " <-- ESP32" if p in esp32_candidates else ""
+                print(f"  {p}{marker}")
+            if not esp32_candidates:
+                print("\nNo ESP32 devices detected (VID 0x303A/0x10C4 or matching description).")
+            else:
+                print(f"\n{len(esp32_candidates)} ESP32 device(s) detected.")
         else:
             print("No serial ports found.")
         return
@@ -619,15 +647,50 @@ def main():
     # ── resolve port ──────────────────────────────────────────────
     port = args.port
     if not args.dry_run and not port:
-        port = SerialManager.auto_detect_esp32()
-        if port:
+        candidates = SerialManager.auto_detect_all_esp32()
+        if not candidates:
+            LOG.error(
+                "[auto-detect] no ESP32 port found. Check USB connection."
+            )
+            all_ports = SerialManager.list_ports()
+            if all_ports:
+                LOG.info("[auto-detect] available serial ports: %s", ", ".join(all_ports))
+            else:
+                LOG.info("[auto-detect] no serial ports detected at all.")
+            LOG.info("[auto-detect] specify --port manually, or use --dry-run for testing.")
+            sys.exit(1)
+        elif len(candidates) == 1:
+            port = candidates[0]
             LOG.info("[auto-detect] using ESP32 port: %s", port)
         else:
-            LOG.error(
-                "[auto-detect] no ESP32 port found. Specify --port or check USB connection."
-            )
-            LOG.info("[auto-detect] available ports: %s", SerialManager.list_ports())
-            sys.exit(1)
+            # Multiple ESP32s — pick one
+            LOG.warning("[auto-detect] multiple ESP32 devices found (%d):", len(candidates))
+            for i, dev in enumerate(candidates, 1):
+                LOG.warning("  [%d] %s", i, dev)
+            if sys.stdin.isatty():
+                # Interactive: let user choose
+                print(f"\nMultiple ESP32 devices detected ({len(candidates)}):", file=sys.stderr)
+                for i, dev in enumerate(candidates, 1):
+                    print(f"  [{i}] {dev}", file=sys.stderr)
+                while True:
+                    try:
+                        choice = input(f"Select device [1-{len(candidates)}]: ").strip()
+                        idx = int(choice)
+                        if 1 <= idx <= len(candidates):
+                            port = candidates[idx - 1]
+                            LOG.info("[auto-detect] user selected: %s", port)
+                            break
+                        print(f"  Invalid choice: {choice}", file=sys.stderr)
+                    except (ValueError, EOFError, KeyboardInterrupt):
+                        print("\nAborted.", file=sys.stderr)
+                        sys.exit(1)
+            else:
+                # Piped stdin (e.g., from agent_bridge) — auto-pick first, warn
+                port = candidates[0]
+                LOG.warning(
+                    "[auto-detect] stdin is piped — auto-selecting first ESP32: %s "
+                    "(use --port to specify a different one)", port
+                )
 
     if not args.dry_run and not port:
         LOG.error("--port is required (or use --dry-run for testing)")
