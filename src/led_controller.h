@@ -8,10 +8,12 @@
 
 // ── LED Output Mode ───────────────────────────────────────────
 enum class LedMode : uint8_t {
-    OFF        = 0,
-    ON         = 1,
-    SLOW_BLINK = 2,   // 1 Hz (500ms on, 500ms off)
-    FAST_BLINK = 3    // 2 Hz (250ms on, 250ms off)
+    OFF           = 0,
+    ON            = 1,
+    SLOW_BLINK    = 2,   // 1 Hz (500ms on, 500ms off)
+    FAST_BLINK    = 3,   // 2 Hz (250ms on, 250ms off)
+    SLOWEST_BLINK = 4,   // 0.625 Hz (800ms on, 800ms off) — ~1.6s period
+    BREATH        = 5    // 2-second sine-wave breathing (analogWrite)
 };
 
 // ── Agent Operational State ────────────────────────────────────
@@ -25,11 +27,13 @@ enum class AgentState : uint8_t {
     SILENT       = 5   // Special overlay — all LEDs off
 };
 
-// ── Per-LED Blink State Tracking ──────────────────────────────
+// ── Per-LED Blink/Breath State Tracking ────────────────────────
 struct LedBlink {
     bool state;                     // Current output: HIGH or LOW
-    unsigned long previousMillis;   // Last toggle timestamp (ms)
-    unsigned long interval;         // 0 = steady, >0 = blink half-period in ms
+    unsigned long previousMillis;   // Last toggle / tick timestamp (ms)
+    unsigned long interval;         // 0 = steady, >0 = half-period in ms
+    unsigned long breathStartTime;  // Start of current 2s breath cycle (ms)
+    bool analogMode;               // true = analogWrite(), false = digitalWrite()
 };
 
 // ── LED Output Signal Configuration ───────────────────────────

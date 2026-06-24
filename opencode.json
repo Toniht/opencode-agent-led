@@ -1,19 +1,4 @@
 {
   "$schema": "https://opencode.ai/config.json",
-  "plugin": [
-    "./scripts/agent-led-plugin.mjs",
-    "oh-my-openagent"
-  ],
-  "mcp": {
-    "esp32-devops": {
-      "type": "local",
-      "command": [
-        "node",
-        "D:\\Code\\opencode-light\\opencode-light\\opencode-light\\esp32-devops-mcp\\dist\\index.js"
-      ],
-      "environment": {
-        "FIRMWARE_TOOLKIT_PATH": "D:\\Code\\opencode-light\\opencode-light\\opencode-light\\esp32-devops-mcp"
-      }
-    }
-  }
+  "plugin": ["./scripts/agent-led-plugin.mjs"]
 }

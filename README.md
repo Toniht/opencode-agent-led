@@ -28,72 +28,44 @@ ESP32-S3          LED 模块
 
 ## 使用教程
 
-### 环境要求
-
-- Windows 10/11
-- Python 3.11+
-- PlatformIO CLI（`pip install platformio`）
-- Node.js（OpenCode 自带）
-
-### 第一步：安装依赖
+### 一行命令安装
 
 ```powershell
-scripts\setup.bat
+# Windows
+scripts\install.bat
+
+# Linux / macOS
+bash scripts/install.sh
 ```
 
-### 第二步：烧录固件
+> 自动完成：Python 依赖 → ESP32 检测 → 固件烧录 → 用户级插件注册。
+> 已有 ESP32 固件可跳过烧录：`scripts\install.bat --plugin-only`
 
-> ⚠️ **仅首次或固件更新时需要**。固件写入 Flash，拔电不丢失，换电脑无需重烧。
+### 日常使用
 
-```powershell
-# 查看 ESP32 对应的 COM 端口
-pio device list
-
-# 烧录（替换 COMx 为实际端口，如 COM3、COM9）
-pio run -t upload --upload-port COMx
-```
-
-烧录成功后，ESP32 自动重启，绿灯亮起表示就绪。
-
-### 第三步：配置 OpenCode 插件
-
-插件已配置在 `opencode.json` 中：
-
-```json
-{
-  "plugin": ["./scripts/agent-led-plugin.mjs"]
-}
-```
-
-**重启 OpenCode** 即可自动加载插件。插件会实时监听 agent 状态变化并写入状态文件。
-
-### 第四步：启动监控
-
-```powershell
-scripts\start_monitor.bat
-```
-
-启动后：
-- 绿灯常亮 = 系统就绪
-- agent 工作时自动切换黄灯
-- 提问时绿黄交替闪烁
-- 出错时红灯
-
-按 `Ctrl+C` 停止监控。
-
-> 💡 **提示**：如果 COM 端口不是 COM9，修改 `scripts\start_monitor.bat` 中的端口号，或使用：
-> ```powershell
-> python scripts\agent_bridge.py | python scripts\agent_relay.py --port COMx -v
-> ```
-
-### 日常使用流程
-
-```
 1. 插上 ESP32 USB
-2. 打开 OpenCode
-3. 运行 scripts\start_monitor.bat
-4. 正常使用 OpenCode，灯会自动变化
+2. 打开 OpenCode → 插件自动加载 → 绿灯呼吸 = 就绪
+3. 正常使用，灯自动随 agent 状态变化
+
+### 独立测试（不启动 OpenCode）
+
+```powershell
+node scripts\test-publisher.mjs                    # 完整序列
+node scripts\test-publisher.mjs --sequence quick   # 快速测试
+node scripts\test-publisher.mjs --dry-run          # 仅日志
 ```
+
+### 管理命令
+
+| 操作 | 命令 |
+|------|------|
+| 一键安装 | `scripts\install.bat` |
+| 固件更新 | `scripts\flash.bat` |
+| 安全停止 | `scripts\stop_monitor.bat` |
+| 独立测试 | `node scripts\test-publisher.mjs` |
+| 查看日志 | `.omo\monitor\agent_events.log` |
+
+> ⚠️ **不要使用 `taskkill /IM python.exe`**，会误杀所有 Python 进程。始终用 `stop_monitor.bat`。
 
 ## 工作原理
 
