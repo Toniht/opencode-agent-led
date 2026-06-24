@@ -4,13 +4,17 @@
 
 ## 灯效
 
-| 状态 | LED | 含义 |
-|------|-----|------|
-| IDLE | 🟢 绿灯常亮 | agent 空闲，等待输入 |
-| EXECUTING | 🟡 黄灯常亮 | agent 正在执行任务（thinking、输出、等待子任务） |
-| QUESTION | 🟢🟡 交替闪烁 | agent 向用户提问，需要用户决策 |
-| ERROR | 🔴 红灯常亮 | agent 出错（连续 3 次错误后锁定，需 RESET） |
-| DISCONNECTED | 🔴 红灯快闪 | 监控程序未运行或 USB 断开 |
+| 状态 | LED 效果 | 含义 |
+|------|----------|------|
+| IDLE | 🟢 绿灯呼吸（2s 正弦波） | agent 空闲，等待输入 |
+| EXECUTING | 🟡 黄灯常亮 | agent 正在执行任务（thinking、输出、子任务） |
+| QUESTION | 🟢🟡 交替闪烁（1Hz） | agent 向用户提问，需要用户决策 |
+| ERROR | 🔴 红灯慢闪（~0.625Hz，约 1.6s 周期） | agent 出错（连续 3 次后锁定，需发 RESET 解锁） |
+| DISCONNECTED | 🔴 红灯快闪（2Hz） | 监控程序未运行或 USB 断开 |
+| SILENT | 全灭 | 静默覆盖模式，保留底层状态 |
+
+> 状态优先级（高 → 低）：`ERROR > QUESTION > EXECUTING > IDLE > DISCONNECTED`。
+> SILENT 为特殊覆盖层，可叠加在任何状态之上，退出时恢复原状。
 
 ## 硬件接线
 
@@ -22,9 +26,9 @@ ESP32-S3          LED 模块
   GND    ───────── GND
 ```
 
-- 开发板：ESP32-S3（CH340 USB-UART）
+- 开发板：ESP32-S3-R16N8（原生 USB CDC，非 CH340）
 - LED 模块：共阴三色交通灯模块，每路串 220Ω 限流电阻
-- 供电：USB 接口取电，无需外部电源
+- 供电：USB 总线供电，无需外部电源
 
 ## 使用教程
 
@@ -71,19 +75,18 @@ node scripts\test-publisher.mjs --dry-run          # 仅日志
 
 ```
 OpenCode 内部事件流
-  ↓ session.status (busy/idle)、session.error、question.asked
-agent-led-plugin.mjs（Node.js 插件，自动检测）
-  ↓ 写入文件
-.omo/agent_state
-  ↓ 0.3s 轮询
-agent_bridge.py（Python 桥接）
-  ↓ stdout 管道
-agent_relay.py（Python 串口中继）
+  ↓ session.status / session.error / question.asked …（12+ 事件类型）
+agent-led-plugin.mjs（Node.js 插件，运行在 OpenCode 进程内）
+  ↓ 300ms 防抖 → 直接 stdin 写入命令字符串
+agent_relay.py（Python 串口中继，由插件自动 spawn）
   ↓ USB 串口 115200 baud
-ESP32 固件（Arduino C++ 状态机）
+ESP32 固件（Arduino C++ 优先级状态机）
   ↓ GPIO 4/5/6
 🟢🟡🔴 LED
 ```
+
+**v7 改进**：插件直接通过 stdin 管道向中继发送命令，中间无文件轮询延迟。
+独立运行（无需 OpenCode）的场景仍保留 `agent_bridge.py` + `start_monitor.bat` 的管道模式。
 
 ## 项目结构
 
@@ -92,17 +95,22 @@ ESP32 固件（Arduino C++ 状态机）
 ├── opencode.json               # OpenCode 插件注册
 ├── src/                        # ESP32 固件（Arduino C++）
 │   ├── main.cpp                # 主循环 + 优先级状态机 + 心跳看门狗
-│   ├── led_controller.h/cpp    # 非阻塞 millis() LED 控制
-│   ├── serial_protocol.h/cpp   # 8 命令串口解析器
-│   └── pin_config.h            # GPIO 引脚定义
+│   ├── led_controller.h/cpp    # 非阻塞 millis() LED 控制（呼吸/闪烁）
+│   ├── serial_protocol.h/cpp   # 8 命令串口解析器 + CRC 校验
+│   └── pin_config.h            # GPIO 引脚定义（G=4, Y=5, R=6）
 ├── scripts/                    # PC 端
-│   ├── agent-led-plugin.mjs    # OpenCode 事件插件（自动状态检测）
-│   ├── agent_bridge.py         # 状态文件监听桥接
-│   ├── agent_relay.py          # 串口命令中继 + 心跳
-│   ├── start_monitor.bat       # 一键启动监控
-│   └── setup.bat               # 依赖安装脚本
-├── specs/                      # 设计文档
-└── test/                       # 单元测试
+│   ├── agent-led-plugin.mjs    # OpenCode v7 事件插件（自动检测 + stdin 直控）
+│   ├── agent_relay.py          # 串口命令中继 + 心跳（5s 超时看门狗）
+│   ├── agent_bridge.py         # 状态文件监听桥接（独立运行模式）
+│   ├── test-publisher.mjs      # 测试序列发生器（完整/快速/模拟运行）
+│   ├── install.bat / .sh       # 一键安装：Python 依赖 → 烧录 → 插件注册
+│   ├── flash.bat               # 固件烧录快捷命令
+│   ├── start_monitor.bat       # 启动监控（bridge → relay 管道）
+│   ├── stop_monitor.bat / .ps1 # 安全停止监控程序
+│   ├── requirements.txt        # Python 依赖清单
+│   └── setup.bat               # Python 依赖安装
+├── specs/                      # 设计文档（spec / plan / data-model / contracts）
+└── test/                       # 单元测试（Unity 框架）
 ```
 
 ## 故障排除
